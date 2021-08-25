@@ -10,7 +10,7 @@ from django.contrib.auth import login, logout
 from django.shortcuts import redirect, render
 from openhumans.models import OpenHumansMember
 
-from .models import PublicExperience
+from .models import Experience
 
 logger = logging.getLogger(__name__)
 
@@ -48,38 +48,43 @@ def logout_user(request):
 
 def upload(request):
     if request.method == 'POST':
+        permission = {'public': 'public', 'research': 'research'}
         print(request.POST)
-        experience_text = request.POST.get('experience')
-        wish_different_text = request.POST.get('wish_different')
+        experience = request.POST.get('experience')
+        suggestion = request.POST.get('suggestion')
         viewable = request.POST.get('viewable')
         if not viewable:
-            viewable = 'not public'
+            permission['public'] = 'not public'
         research = request.POST.get('research')
         if not research:
-            research = 'non-research'
+            permission['research'] = 'non-research'
 
-        if experience_text:
+        if experience:
             experience_id = str(uuid.uuid1())
             output_json = {
-                'text': experience_text,
-                'wish_different': wish_different_text,
-                'timestamp': str(datetime.datetime.now())}
+                'experience': experience,
+                'suggestion': suggestion,
+                'timestamp': str(datetime.datetime.now()),
+                'user_id': ""}
             output = io.StringIO()
             output.write(json.dumps(output_json))
             output.seek(0)
             metadata = {'tags': [viewable, research],
-                        'uuid': experience_id,
-                        'description': 'this is a test file'}
+                        'experience_id': experience_id,
+                        'description': "details about experience " + experience_id,
+                        'moderation_state': ""}
             request.user.openhumansmember.upload(
                 stream=output,
-                filename='testfile.json',
+                filename=experience_id + ".json",
                 metadata=metadata)
             if viewable == 'viewable':
-                PublicExperience.objects.create(
-                    experience_text=experience_text,
-                    difference_text=wish_different_text,
+                Experience.objects.create(
+                    experience=experience,
+                    suggestion=suggestion,
+                    permission=permission,
                     open_humans_member=request.user.openhumansmember,
-                    experience_id=experience_id)
+                    experience_id=experience_id,
+                    moderation_state="in review")
         return redirect('main:confirm_page')
     else:
         if request.user.is_authenticated:
@@ -96,7 +101,7 @@ def list_files(request):
 
 
 def list_public_experiences(request):
-    experiences = PublicExperience.objects.filter(approved='approved')
+    experiences = Experience.objects.filter(approved='approved')
     return render(
         request,
         'main/experiences_page.html',
@@ -104,7 +109,7 @@ def list_public_experiences(request):
 
 
 def moderate_public_experiences(request):
-    experiences = PublicExperience.objects.filter(approved='not reviewed')
+    experiences = Experience.objects.filter(approved='not reviewed')
     return render(
         request,
         'main/moderate_public_experiences.html',
@@ -112,7 +117,7 @@ def moderate_public_experiences(request):
 
 
 def review_experience(request, experience_id):
-    experience = PublicExperience.objects.get(experience_id=experience_id)
+    experience = Experience.objects.get(experience_id=experience_id)
     print(experience)
     experience.approved = 'approved'
     experience.save()
@@ -121,7 +126,7 @@ def review_experience(request, experience_id):
 
 
 def make_non_viewable(request, oh_file_id, file_uuid):
-    pe = PublicExperience.objects.get(experience_id=file_uuid)
+    pe = Experience.objects.get(experience_id=file_uuid)
     pe.delete()
     oh_files = request.user.openhumansmember.list_files()
     for f in oh_files:
@@ -156,9 +161,9 @@ def make_viewable(request, oh_file_id, file_uuid):
                 metadata=new_metadata)
             request.user.openhumansmember.delete_single_file(
                 file_id=oh_file_id)
-            PublicExperience.objects.create(
-                experience_text=experience['text'],
-                difference_text=experience['wish_different'],
+            Experience.objects.create(
+                experience=experience['experience'],
+                suggestion=experience['suggestion'],
                 open_humans_member=request.user.openhumansmember,
                 experience_id=file_uuid)
     return redirect('list')
